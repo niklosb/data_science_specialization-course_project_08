@@ -1,20 +1,48 @@
+---
+title: "Course Project - Practical Machine Learning, Data Science Specialization Track"
+author: "Jesús Pestana Puerta"
+date: "08/25/2014"
+output: html_document
+---
+
+# Introduction
+
+This exercise is based on the Weight Lifting Exercise Dataset. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+The objective of the exercise is to train a classifier to determine whether the user is performing gym exercises correctly or not.
+
+# Important remark
+
+If you want to reproduce this research, you have to set the EVALUATE_CODE_CHUNKS variables to TRUE(see first code chunk).
+
+# Solution
+
+First, the data is loaded into R
+
+```{r}
+# set working directory and load the data into Rstudio
 setwd("~/Documents/E-Courses/Data_Science_Specialization/08_PracticalMachineLearning/CourseProject")
-rm( list = ls() )
+
+EVALUATE_CODE_CHUNKS = FALSE
 
 training <- read.csv("pml-training.csv", na.strings = c("NA",""))
 testing  <- read.csv("pml-testing.csv" , na.strings = c("NA",""))
 # head(training)
+```
 
+Afterwards, the data is cleaned: all NAs are removed, and only the useful variables are kept. 
+
+```{r, eval=EVALUATE_CODE_CHUNKS}
 # 1. Cleaning the data
 # 1.a remove NAs
 column_index_NA <- colSums(is.na(training))>=0.80*nrow(training) 
 training <- training[, !column_index_NA ]
 testing  <- testing[ , !column_index_NA ]
 # 1.b check if there are any NAs left
-column_num_train_rest_NA   <- colSums(is.na(training))
-sum(column_num_train_rest_NA) # 0, no NAs left
-column_num_test__rest_NA   <- colSums(is.na(testing))
-sum(column_num_test__rest_NA) # 0, no NAs left
+#column_num_train_rest_NA   <- colSums(is.na(training))
+#sum(column_num_train_rest_NA) # 0, no NAs left
+#column_num_test__rest_NA   <- colSums(is.na(testing))
+#sum(column_num_test__rest_NA) # 0, no NAs left
 # 1.c select useful variables
 #names(training)[8]
 #names(training)[59]
@@ -30,12 +58,21 @@ rownames(df_train) <- as.character(training$X)
 df_test  <- testing[ ,column_index_useful_data]
 rownames(df_test) <- as.character(testing$X)
 col_dfclass_ind <- 53
+```
+
+After several attemps to solve the course project, I found that the best solution is not to apply PCA and select the variables judiciously. An explanation of the contents of the dataset can be found here: http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf . I decided to use all the variables that give the position of the body, and also the total_acceleration variables, which indicate the effort being done by a muscle group at that moment. 
+
+```{r, eval=EVALUATE_CODE_CHUNKS}
 # 1.e I selected position and total acceleration variables
 selected_var_indexes <- c(1,2,3,4,14,15,16,17,27,28,29,30,40,41,42,43)
 df_train <- df_train[,c(col_dfclass_ind, selected_var_indexes)]
 #names(df_train)
 df_test <- df_test[,c(selected_var_indexes)]
+```
 
+Then several "gbm" model are fit to the data using cross-validation. The objective is to obtain a classifier that correctly predicts the value of the "classe" factor variable. I decided to perform K-fold cross validation with K=5. I would have rather obtained 10 models, but I settled for 5 due to time constraints.
+
+```{r, eval=EVALUATE_CODE_CHUNKS}
 # K-fold cross validation, K = 5
 library(caret)
 set.seed(9682)
@@ -68,6 +105,11 @@ for (k in 1:K) {
   }
   sapply(models,class)
 } 
+```
+
+Using the K=5 obtained models, that are the results of K-fold cross validation the out-of-sample error are estimated:
+
+```{r, eval=EVALUATE_CODE_CHUNKS}
 # out of sample error calculation
 accuracy_vec <- vector(length=K)
 for (k in 1:K) {
@@ -87,7 +129,17 @@ for (k in 1:K) {
     accuracy_vec[k] <- sum( predicted_classe == fold_k_test_std$classe) / nrow(fold_k_test_std) 
 }
 out_of_sample_error <- 1 - mean(accuracy_vec)
+```
 
+The obtained results are:
+
+  - mean(accuracy): 93.4%
+  
+  - mean(out_of_sample_error): 6.6%
+
+Then, the models are used on the testing data and in the course project submission:
+
+```{r, eval=EVALUATE_CODE_CHUNKS}
 # 5. Test data
 # 5.a Normalize the data
 df_test_std <- predict(preProc_std,df_test)
@@ -118,3 +170,4 @@ pml_write_files(answers)
 
 # 7. The model that predicted everything correctly is model5
 selected_model <- models[[5]]
+```
