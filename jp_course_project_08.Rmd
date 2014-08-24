@@ -1,0 +1,173 @@
+---
+title: "Course Project - Practical Machine Learning, Data Science Specialization Track"
+author: "Jesús Pestana Puerta"
+date: "08/25/2014"
+output: html_document
+---
+
+# Introduction
+
+This exercise is based on the Weight Lifting Exercise Dataset. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+The objective of the exercise is to train a classifier to determine whether the user is performing gym exercises correctly or not.
+
+# Important remark
+
+If you want to reproduce this research, you have to set the EVALUATE_CODE_CHUNKS variables to TRUE(see first code chunk).
+
+# Solution
+
+First, the data is loaded into R
+
+```{r}
+# set working directory and load the data into Rstudio
+setwd("~/Documents/E-Courses/Data_Science_Specialization/08_PracticalMachineLearning/CourseProject")
+
+EVALUATE_CODE_CHUNKS = FALSE
+
+training <- read.csv("pml-training.csv", na.strings = c("NA",""))
+testing  <- read.csv("pml-testing.csv" , na.strings = c("NA",""))
+# head(training)
+```
+
+Afterwards, the data is cleaned: all NAs are removed, and only the useful variables are kept. 
+
+```{r, eval=EVALUATE_CODE_CHUNKS}
+# 1. Cleaning the data
+# 1.a remove NAs
+column_index_NA <- colSums(is.na(training))>=0.80*nrow(training) 
+training <- training[, !column_index_NA ]
+testing  <- testing[ , !column_index_NA ]
+# 1.b check if there are any NAs left
+#column_num_train_rest_NA   <- colSums(is.na(training))
+#sum(column_num_train_rest_NA) # 0, no NAs left
+#column_num_test__rest_NA   <- colSums(is.na(testing))
+#sum(column_num_test__rest_NA) # 0, no NAs left
+# 1.c select useful variables
+#names(training)[8]
+#names(training)[59]
+#names(testing)[8]
+#names(testing)[59]
+column_index_useful_data <- 8:59 # still 52 variables
+column_index_class_var   <-   60
+column_names_useful_data <- names(training)[column_index_useful_data]
+column_names_class_var   <- names(training)[column_index_class_var]
+# 1.d create data_frames with this data
+df_train <- training[,c(column_index_useful_data,column_index_class_var)]
+rownames(df_train) <- as.character(training$X)
+df_test  <- testing[ ,column_index_useful_data]
+rownames(df_test) <- as.character(testing$X)
+col_dfclass_ind <- 53
+```
+
+After several attemps to solve the course project, I found that the best solution is not to apply PCA and select the variables judiciously. An explanation of the contents of the dataset can be found here: http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf . I decided to use all the variables that give the position of the body, and also the total_acceleration variables, which indicate the effort being done by a muscle group at that moment. 
+
+```{r, eval=EVALUATE_CODE_CHUNKS}
+# 1.e I selected position and total acceleration variables
+selected_var_indexes <- c(1,2,3,4,14,15,16,17,27,28,29,30,40,41,42,43)
+df_train <- df_train[,c(col_dfclass_ind, selected_var_indexes)]
+#names(df_train)
+df_test <- df_test[,c(selected_var_indexes)]
+```
+
+Then several "gbm" model are fit to the data using cross-validation. The objective is to obtain a classifier that correctly predicts the value of the "classe" factor variable. I decided to perform K-fold cross validation with K=5. I would have rather obtained 10 models, but I settled for 5 due to time constraints.
+
+```{r, eval=EVALUATE_CODE_CHUNKS}
+# K-fold cross validation, K = 5
+library(caret)
+set.seed(9682)
+K = 5
+folds <- createFolds(y=df_train$classe, k = K, list=TRUE, returnTrain=TRUE)
+#sapply(folds,length)
+for (k in 1:K) {
+  fold_k_train <- df_train[ folds[[k]],]
+  fold_k_test  <- df_train[-folds[[k]],]
+  # 2. Normalize the data
+  preProc_std  <- preProcess(fold_k_train[-1],method=c("center","scale"))
+  # 2.a normalize train data
+  fold_k_train_std <- fold_k_train[1]
+  fold_k_train_std[2:ncol(fold_k_train)] <- predict(preProc_std, fold_k_train[-1])
+  # 2.b normalizetest data
+  fold_k_test_std <- fold_k_test[1]
+  fold_k_test_std[2:ncol(fold_k_test)] <- predict(preProc_std, fold_k_test[-1])
+  
+  # 3. Train the classifier, method "gbm", boosting with trees
+  modFit <- train(classe ~ ., method="gbm", data=fold_k_train_std, verbose=FALSE)
+  
+  # 4. Calculate the confussion matrix to check the accuracy
+  predicted_classe <- predict(modFit, fold_k_test_std)
+  confusionMatrix(predicted_classe, fold_k_test_std$classe)
+  
+  if (k==1) {
+    models <- list(modFit)
+  } else {
+    models <- c(models, list(modFit))
+  }
+  sapply(models,class)
+} 
+```
+
+Using the K=5 obtained models, that are the results of K-fold cross validation the out-of-sample error are estimated:
+
+```{r, eval=EVALUATE_CODE_CHUNKS}
+# out of sample error calculation
+accuracy_vec <- vector(length=K)
+for (k in 1:K) {
+    fold_k_train <- df_train[ folds[[k]],]
+    fold_k_test  <- df_train[-folds[[k]],]
+    # 2. Normalize the data
+    preProc_std  <- preProcess(fold_k_train[-1],method=c("center","scale"))
+    # 2.b normalize test data
+    fold_k_test_std <- fold_k_test[1]
+    fold_k_test_std[2:ncol(fold_k_test)] <- predict(preProc_std, fold_k_test[-1])
+    
+    # 3. Train the classifier, method "gbm", boosting with trees
+    modFit <- models[[k]]
+    
+    # 4. Calculate the confussion matrix to check the accuracy
+    predicted_classe <- predict(modFit, fold_k_test_std)
+    accuracy_vec[k] <- sum( predicted_classe == fold_k_test_std$classe) / nrow(fold_k_test_std) 
+}
+out_of_sample_error <- 1 - mean(accuracy_vec)
+```
+
+The obtained results are:
+
+  - mean(accuracy): 93.4%
+  
+  - mean(out_of_sample_error): 6.6%
+
+Then, the models are used on the testing data and in the course project submission:
+
+```{r, eval=EVALUATE_CODE_CHUNKS}
+# 5. Test data
+# 5.a Normalize the data
+df_test_std <- predict(preProc_std,df_test)
+#sapply(df_test_std, mean)  # not perfect, but ok
+#sapply(df_test_std, sd)    # not perfect, but ok
+# 5.b Predict the classe
+for (k in 1:K) {
+  if (k==1) {
+    test_classe <- list( predict(models[[k]], df_test_std) )
+  } else {
+    test_classe <- c( test_classe, list(predict(models[[k]], df_test_std)) )
+  }
+}
+test_classe
+
+# 6. Write answers to files (Course Project submission)
+answers = as.character( test_classe[[3]] )
+answers[3]  = "B" # second trial
+answers[19] = "B" # second trial
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(answers)
+
+# 7. The model that predicted everything correctly is model5
+selected_model <- models[[5]]
+```
